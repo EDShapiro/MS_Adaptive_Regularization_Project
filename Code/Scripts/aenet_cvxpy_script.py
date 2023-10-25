@@ -30,7 +30,7 @@ n_lmbda = 100  # number of lambda_1 values
 beta = cp.Variable(pn)
 lambda_1 = cp.Parameter(nonneg=True)
 #lambd_2 = cp.Parameter(nonneg=True)
-problem = cp.Problem(cp.Minimize(aenet_objective_fn(X[0:n,:], Y[:,0], beta, lambda_1, lambda_2[0], ad_w_arr[0,:])))
+problem = cp.Problem(cp.Minimize(aenet_objective_fn(X[0:n,:], Y[:,0], beta, lambda_1, lambda_2[0], ad_w_arr[0,:,0])))
 
 #Compare solution to solution where where weights for coefficients that were 0 
 #in ENet are also zero. 
@@ -112,3 +112,7 @@ lmbda_1_sol = lambda_values[lmbda_idx]
 
 
 #Calculate adaptive weights from coefficients
+
+#Plot the identity line and histograms of coefficients
+
+#Compare number of incorrect nonzero terms for adaptive Lasso, Lasso and Eleastic NEt
