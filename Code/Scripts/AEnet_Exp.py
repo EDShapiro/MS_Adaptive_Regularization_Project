@@ -17,12 +17,17 @@ Created on Tue Oct 10 14:22:09 2023
 import cvxpy as cp
 import random
 import numpy as np
-
-def tts(N, cv_n):
-    cv_idx = np.zeros((cv_n, int(N/cv_n)))
-    idx_list = np.arange(0,N)
+def train_err_plots(lambda_1, data):
+    plt.plot(lambda_1, data)
+    plt.title('Training Error vs L1 Regularization Coeff.')
+    plt.xlabel('L1 Regularization Coeff.')
+    plt.ylabel('MSE')
+    
+def tts(n, cv_n):
+    cv_idx = np.zeros((cv_n, int(n/cv_n)))
+    idx_list = np.arange(0,n)
     for i in range(0, cv_n):
-        cv_idx[i,:] = random.sample(sorted(idx_list),int(N/cv_n))
+        cv_idx[i,:] = random.sample(sorted(idx_list),int(n/cv_n))
         idx_list = np.setdiff1d(idx_list, cv_idx[i,:])
     return cv_idx.astype(int)
         
@@ -39,7 +44,7 @@ def loss_fn(X, Y, beta):
 #lambda_2:= lambda_2 from original elastic-net 
 #lambda_1*:= New hyperparameter thatis determined via CV, or some such nonsense.
 
-def aenet_objective_fn(X, Y, beta, lambd_1, lambd_2, weights):
+def aenet_objective_fn(X, Y, beta, lambd_1, lambd_2, weights, verbose = True):
     return loss_fn(X, Y, beta) + lambd_1 * cp.norm1(cp.multiply(weights,beta)) + lambd_2*cp.norm2(beta)
 
 def alasso_objective_fn(X, Y, beta, lambd_1, lambd_2, weights):
@@ -49,10 +54,10 @@ def alasso_objective_fn(X, Y, beta, lambd_1, lambd_2, weights):
 def mse(X, Y, beta):
     return loss_fn(X, Y, beta).value
 
-def ada_meth_script(N, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w_arr, meth = 'aenet'):
+def ada_meth_cv_script(N,n, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w_arr, meth = 'aenet'):
     beta = cp.Variable(pn)
     lambda_1 = cp.Parameter(nonneg=True)
-    lambda_values = np.logspace(-8, 0, n_lmbda)
+    lambda_values = np.logspace(-8, 1, n_lmbda)
     
     train_errors = np.zeros((cv_n, n_lmbda, N))
     test_errors = np.zeros((cv_n, n_lmbda, N))
@@ -60,12 +65,14 @@ def ada_meth_script(N, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w_arr, meth = 'aene
     
     train_f = np.zeros((N, n_lmbda))
     test_f = np.zeros((N, n_lmbda))
-    beta_f = np.zeros((N, n_lmbda))
+    beta_arr = np.zeros((N, pn))
+    lambda_arr = []
+    mse_arr = []
     
     #Cross-Validation to prevent overtraining the model
     for i in range(0, N):
         
-        idx_arr = tts(N, cv_n)
+        idx_arr = tts(n, cv_n)
         X_init = X[i*n:(i+1)*n,:]
         Y_init = Y[:,i]
         
@@ -81,6 +88,8 @@ def ada_meth_script(N, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w_arr, meth = 'aene
             
             X_test  = X_init[test_idx,:]
             Y_test = Y_init[test_idx]
+            
+            
             
             if meth == 'aenet':
                 problem = cp.Problem(cp.Minimize(aenet_objective_fn(X_train, Y_train, beta, lambda_1, lambda_2[i], ad_w_arr[i,:])))
@@ -99,21 +108,71 @@ def ada_meth_script(N, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w_arr, meth = 'aene
                 problem.solve()
                 train_err_int.append(mse(X_train, Y_train, beta))
                 test_err_int.append(mse(X_test, Y_test, beta))
-                beta_val_int.append(beta.value)
+                #beta_val_int.append(beta.value)
+                
 
             
             
             train_errors[j,:,i] = train_err_int
             test_errors[j,:,i] = test_err_int
-            #beta_values[j,:,i] = beta_val_int
-    
-    for i in range(0, N):
+            
         test_f[i,:] = 1/X_init.shape[0]*np.sum(test_errors[:,:,i], axis = 0)
-    return test_f
+        mse_arr.append(np.min(test_f[i,:]))
+        idx_temp = np.where(test_f[i,:] == np.min(test_f[i,:]))[0]
+        lambda_arr.append(lambda_values[idx_temp])
+        #beta_arr[i,:] = beta_val_int[idx_temp]
+            # beta_values[j,:,i] = beta_val_int
+    
+    
+    # for i in range(0, N):
+    #     test_f[i,:] = 1/X_init.shape[0]*np.sum(test_errors[:,:,i], axis = 0)
+    #     mse_arr.append(np.min(test_f[i,:]))
+    #     idx_temp = np.where(test_f[i,:] == np.min(test_f[i,:]))[0]
+    #     lambda_arr.append(lambda_values[idx_temp])
+        
+    return test_f, lambda_arr, mse_arr
+
+def model_test(N, n, lambda_1, pn, X, Y, lambda_2, ad_w, meth, beta_h):
+    beta = cp.Variable(pn)
+    #lambda_1_p = cp.Parameter(nonneg=True)
+    beta_arr = np.zeros((N, pn))
+    beta_ic = np.zeros(N)
+    beta_dict = {}
+    for i in range(0,N):
+        X_train = X[i*n:(i+1)*n,:]
+        Y_train = Y[:,i]       
+        if meth == 'aenet':
+            problem = cp.Problem(cp.Minimize(aenet_objective_fn(X_train, Y_train, beta, lambda_1[i][0], lambda_2[i], ad_w[i,:])))
+            problem.solve()
+        if meth == 'alasso':
+            problem = cp.Problem(cp.Minimize(aenet_objective_fn(X_train, Y_train, beta, lambda_1[i][0], lambda_2[i], ad_w[i,:])))
+            problem.solve()
+        for j in range(0, pn):
+            if beta.value[j] < 10E-10:
+                beta_arr[i,j] = 0
+            else:
+                beta_arr[i,j] = beta.value[j]
+        beta_ic[i] = np.sum(np.abs(beta_h.astype(bool).astype(int) - beta_arr[i,:].astype(bool).astype(int)))
+    beta_dict['opt_beta_arr'] = beta_arr
+    beta_dict['n_beta_ic'] = beta_ic
+    return beta_dict
+    
+
+# def a_meth_stats()
 
 cv_n = 5
 n_lmbda = 100
-test_f = ada_meth_script(N, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w_arr[:,:,0], meth = 'aenet')
+ad_w = ad_w_arr[:,:,1]
+meth = 'alasso'
+#Number of replicates
+N =100
+#Sample Size
+n = 200
+# test_f_enet_2, lambda_arr_enet_2, mse_arr_enet_2 = ada_meth_cv_script(N, n, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w, meth)
+# beta_dict_enet_2 = model_test(N, n, lambda_arr, pn, X, Y, lambda_2, ad_w, meth, beta_h)
+test_f_alasso_2, lambda_arr_alasso_2, mse_arr_alasso_2 = ada_meth_cv_script(N, n, cv_n, n_lmbda, pn, X, Y, lambda_2, ad_w, meth)
+beta_dict_alasso_2 = model_test(N, n, lambda_arr, pn, X, Y, lambda_2, ad_w, meth, beta_h)
+
     
             
             # beta_v_t = np.zeros((n_lmbda, pn))
